@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>티처블 머신 뱀게임</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    background: #1b1f2a; color: #e8ecf3;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  .sub { color: #9aa4b5; margin-bottom: 18px; font-size: 14px; }
+  .wrap { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+  .panel { background: #252b3a; border-radius: 12px; padding: 16px; }
+  #gameBox { position: relative; }
+  canvas#game { display: block; background: #10131a; border-radius: 8px; }
+  #overlay {
+    position: absolute; inset: 16px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(16,19,26,.82); border-radius: 8px; font-size: 18px;
+  }
+  #overlay[hidden] { display: none; }
+  #overlay b { font-size: 30px; display: block; margin-bottom: 8px; }
+  .stats { display: flex; justify-content: space-between; margin-top: 10px; font-size: 16px; }
+  .side { width: 320px; display: flex; flex-direction: column; gap: 14px; }
+  label { font-size: 13px; color: #9aa4b5; display: block; margin-bottom: 4px; }
+  input[type=text] {
+    width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #3a4256;
+    background: #10131a; color: #e8ecf3;
+  }
+  button {
+    padding: 9px 14px; border: 0; border-radius: 6px; cursor: pointer;
+    background: #4f8cff; color: white; font-weight: 600; font-size: 14px;
+  }
+  button:disabled { background: #3a4256; cursor: not-allowed; }
+  button.secondary { background: #3a4256; }
+  .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  #webcam-container { display: flex; justify-content: center; min-height: 40px; }
+  #webcam-container canvas { border-radius: 8px; width: 200px; height: 200px; }
+  .bar { margin: 6px 0; font-size: 13px; }
+  .bar .name { display: flex; justify-content: space-between; }
+  .bar .track { height: 10px; background: #10131a; border-radius: 5px; overflow: hidden; margin-top: 3px; }
+  .bar .fill { height: 100%; width: 0; background: #6b7488; transition: width .08s; }
+  .bar.active .fill { background: #43d17a; }
+  .bar.active .name { color: #43d17a; font-weight: 700; }
+  #dirShow { font-size: 42px; text-align: center; height: 52px; }
+  #status { font-size: 13px; color: #f5c46b; min-height: 18px; }
+  .hint { font-size: 12px; color: #7f889b; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>🐍 티처블 머신 뱀게임</h1>
+  <div class="sub">웹캠 제스처(RIGHT / LEFT / UP / DOWN)로 뱀을 조종하세요</div>
+
+  <div class="wrap">
+    <div class="panel" id="gameBox">
+      <canvas id="game" width="480" height="480"></canvas>
+      <div id="overlay">
+        <b id="ovTitle">준비</b>
+        <span id="ovText">모델을 불러온 뒤 시작 버튼을 누르세요<br>(키보드 방향키로도 플레이 가능)</span>
+        <div class="row" style="justify-content:center;margin-top:16px">
+          <button id="startBtn">시작 (Space)</button>
+        </div>
+      </div>
+      <div class="stats">
+        <span>점수: <b id="score">0</b></span>
+        <span>최고: <b id="best">0</b></span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <label>① 티처블 머신 모델 URL (공유 링크)</label>
+        <input type="text" id="modelUrl" value="https://teachablemachine.withgoogle.com/models/41OK3Sa6H/">
+        <div class="row">
+          <button id="loadUrlBtn">URL로 불러오기</button>
+        </div>
+        <label style="margin-top:12px">또는 내려받은 파일 선택 (model.json, metadata.json, weights.bin)</label>
+        <input type="file" id="modelFiles" multiple accept=".json,.bin">
+        <div class="row">
+          <button id="loadFileBtn" class="secondary">파일로 불러오기</button>
+        </div>
+        <div id="status"></div>
+      </div>
+
+      <div class="panel">
+        <div id="webcam-container"></div>
+        <div id="dirShow">·</div>
+        <div id="bars"></div>
+        <label style="margin-top:10px">인식 기준 확률: <b id="thVal">0.80</b></label>
+        <input type="range" id="threshold" min="0.5" max="0.99" step="0.01" value="0.8" style="width:100%">
+        <label style="margin-top:8px">뱀 속도: <b id="spVal">보통</b></label>
+        <input type="range" id="speed" min="1" max="5" step="1" value="3" style="width:100%">
+      </div>
+
+      <div class="hint">
+        · 클래스 이름은 RIGHT / LEFT / UP / DOWN(또는 DPOW)으로 자동 매칭됩니다.<br>
+        · 반대 방향으로는 바로 꺾을 수 없습니다(뱀 규칙).<br>
+        · 웹캠은 <code>localhost</code> 또는 https 환경에서 가장 잘 동작합니다.
+      </div>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+<script>
+// ===================== 게임 설정 =====================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const GRID = 20;                        // 20x20 칸
+const CELL = canvas.width / GRID;
+const SPEEDS = { 1: [220, '아주 느림'], 2: [170, '느림'], 3: [130, '보통'], 4: [100, '빠름'], 5: [75, '아주 빠름'] };
+
+const DIRS = {
+  UP:    { x: 0,  y: -1, arrow: '⬆️' },
+  DOWN:  { x: 0,  y: 1,  arrow: '⬇️' },
+  LEFT:  { x: -1, y: 0,  arrow: '⬅️' },
+  RIGHT: { x: 1,  y: 0,  arrow: '➡️' },
+};
+const OPPOSITE = { UP: 'DOWN', DOWN: 'UP', LEFT: 'RIGHT', RIGHT: 'LEFT' };
+
+let snake, dir, nextDir, food, score, running = false, timer = null;
+let best = Number(localStorageGet('tmSnakeBest') || 0);
+document.getElementById('best').textContent = best;
+
+function localStorageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function localStorageSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
+function resetGame() {
+  snake = [{ x: 9, y: 10 }, { x: 8, y: 10 }, { x: 7, y: 10 }];
+  dir = 'RIGHT';
+  nextDir = 'RIGHT';
+  score = 0;
+  document.getElementById('score').textContent = 0;
+  placeFood();
+}
+
+function placeFood() {
+  do {
+    food = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) };
+  } while (snake.some(s => s.x === food.x && s.y === food.y));
+}
+
+function setDirection(d) {
+  if (!DIRS[d]) return;
+  // 현재 진행 방향의 반대로는 꺾을 수 없음
+  if (d === OPPOSITE[dir]) return;
+  nextDir = d;
+}
+
+function tick() {
+  dir = nextDir;
+  const head = { x: snake[0].x + DIRS[dir].x, y: snake[0].y + DIRS[dir].y };
+
+  // 벽 또는 몸에 부딪히면 게임 오버
+  if (head.x < 0 || head.y < 0 || head.x >= GRID || head.y >= GRID ||
+      snake.some(s => s.x === head.x && s.y === head.y)) {
+    return gameOver();
+  }
+
+  snake.unshift(head);
+  if (head.x === food.x && head.y === food.y) {
+    score++;
+    document.getElementById('score').textContent = score;
+    placeFood();
+  } else {
+    snake.pop();
+  }
+  draw();
+}
+
+function draw() {
+  ctx.fillStyle = '#10131a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 격자
+  ctx.strokeStyle = '#1a1f2b';
+  for (let i = 0; i <= GRID; i++) {
+    ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(canvas.width, i * CELL); ctx.stroke();
+  }
+
+  // 먹이
+  ctx.fillStyle = '#ff5c6c';
+  ctx.beginPath();
+  ctx.arc(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, CELL / 2 - 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 뱀
+  snake.forEach((s, i) => {
+    ctx.fillStyle = i === 0 ? '#7dffa8' : '#43d17a';
+    ctx.fillRect(s.x * CELL + 1, s.y * CELL + 1, CELL - 2, CELL - 2);
+  });
+
+  // 눈
+  const h = snake[0], d = DIRS[dir];
+  ctx.fillStyle = '#10131a';
+  const cx = h.x * CELL + CELL / 2 + d.x * 4, cy = h.y * CELL + CELL / 2 + d.y * 4;
+  ctx.fillRect(cx - d.y * 5 - 2, cy - d.x * 5 - 2, 4, 4);
+  ctx.fillRect(cx + d.y * 5 - 2, cy + d.x * 5 - 2, 4, 4);
+}
+
+function startGame() {
+  resetGame();
+  draw();
+  running = true;
+  document.getElementById('overlay').hidden = true;
+  restartTimer();
+}
+
+function restartTimer() {
+  clearInterval(timer);
+  if (running) timer = setInterval(tick, SPEEDS[speedEl.value][0]);
+}
+
+function gameOver() {
+  running = false;
+  clearInterval(timer);
+  if (score > best) {
+    best = score;
+    localStorageSet('tmSnakeBest', best);
+    document.getElementById('best').textContent = best;
+  }
+  document.getElementById('ovTitle').textContent = '게임 오버';
+  document.getElementById('ovText').innerHTML = `점수: ${score}<br>다시 하려면 시작을 누르세요`;
+  document.getElementById('overlay').hidden = false;
+}
+
+// 키보드 (보조 조작)
+document.addEventListener('keydown', e => {
+  const map = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT' };
+  if (map[e.key]) { e.preventDefault(); setDirection(map[e.key]); }
+  if (e.code === 'Space' && !running) { e.preventDefault(); startGame(); }
+});
+document.getElementById('startBtn').onclick = startGame;
+
+const speedEl = document.getElementById('speed');
+speedEl.oninput = () => {
+  document.getElementById('spVal').textContent = SPEEDS[speedEl.value][1];
+  restartTimer();
+};
+const thEl = document.getElementById('threshold');
+thEl.oninput = () => document.getElementById('thVal').textContent = Number(thEl.value).toFixed(2);
+
+// ===================== 티처블 머신 =====================
+let model, webcam, maxPredictions, classDirs = [];
+const statusEl = document.getElementById('status');
+
+// 클래스 이름 → 방향 (DPOW 같은 오타도 DOWN으로 처리)
+function classToDir(name) {
+  const n = name.trim().toUpperCase();
+  if (n.includes('RIGHT') || n === 'R' || n.includes('오른')) return 'RIGHT';
+  if (n.includes('LEFT') || n === 'L' || n.includes('왼')) return 'LEFT';
+  if (n.includes('UP') || n === 'U' || n.includes('위')) return 'UP';
+  if (n.includes('DOWN') || n.includes('DPOW') || n === 'D' || n.includes('아래')) return 'DOWN';
+  return null; // 그 외 클래스(예: 정지/배경)는 무시
+}
+
+async function setupModel(loader) {
+  try {
+    statusEl.textContent = '모델 불러오는 중...';
+    model = await loader();
+    maxPredictions = model.getTotalClasses();
+    const labels = model.getClassLabels();
+    classDirs = labels.map(classToDir);
+
+    // 확률 막대 UI
+    const bars = document.getElementById('bars');
+    bars.innerHTML = '';
+    labels.forEach((l, i) => {
+      const d = classDirs[i];
+      bars.insertAdjacentHTML('beforeend', `
+        <div class="bar" id="bar${i}">
+          <div class="name"><span>${l}${d ? ' → ' + DIRS[d].arrow : ' (무시)'}</span><span id="pct${i}">0%</span></div>
+          <div class="track"><div class="fill" id="fill${i}"></div></div>
+        </div>`);
+    });
+
+    if (!webcam) {
+      statusEl.textContent = '웹캠 켜는 중...';
+      webcam = new tmImage.Webcam(200, 200, true); // 좌우 반전
+      await webcam.setup();
+      await webcam.play();
+      document.getElementById('webcam-container').appendChild(webcam.canvas);
+      window.requestAnimationFrame(loop);
+    }
+    statusEl.textContent = '✅ 준비 완료! 시작 버튼을 누르세요.';
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = '❌ 오류: ' + (err.message || err);
+  }
+}
+
+document.getElementById('loadUrlBtn').onclick = () => {
+  let url = document.getElementById('modelUrl').value.trim();
+  if (!url) { statusEl.textContent = '모델 URL을 입력하세요.'; return; }
+  if (!url.endsWith('/')) url += '/';
+  setupModel(() => tmImage.load(url + 'model.json', url + 'metadata.json'));
+};
+
+document.getElementById('loadFileBtn').onclick = () => {
+  const files = [...document.getElementById('modelFiles').files];
+  const m = files.find(f => f.name === 'model.json');
+  const meta = files.find(f => f.name === 'metadata.json');
+  const w = files.find(f => f.name.endsWith('.bin'));
+  if (!m || !meta || !w) { statusEl.textContent = 'model.json, metadata.json, weights.bin 세 파일을 모두 선택하세요.'; return; }
+  setupModel(() => tmImage.loadFromFiles(m, w, meta));
+};
+
+async function loop() {
+  webcam.update();
+  await predict();
+  window.requestAnimationFrame(loop);
+}
+
+async function predict() {
+  if (!model) return;
+  const prediction = await model.predict(webcam.canvas);
+  let bestIdx = 0;
+  prediction.forEach((p, i) => {
+    if (p.probability > prediction[bestIdx].probability) bestIdx = i;
+    document.getElementById('fill' + i).style.width = (p.probability * 100).toFixed(0) + '%';
+    document.getElementById('pct' + i).textContent = (p.probability * 100).toFixed(0) + '%';
+    document.getElementById('bar' + i).classList.remove('active');
+  });
+
+  const d = classDirs[bestIdx];
+  if (d && prediction[bestIdx].probability >= Number(thEl.value)) {
+    document.getElementById('bar' + bestIdx).classList.add('active');
+    document.getElementById('dirShow').textContent = DIRS[d].arrow;
+    if (running) setDirection(d);
+  } else {
+    document.getElementById('dirShow').textContent = '·';
+  }
+}
+
+// 첫 화면
+resetGame();
+draw();
+</script>
+</body>
+</html>
