@@ -1,0 +1,11 @@
+# 모델 가중치 (실행 시 자동 다운로드)
+*.pt
+
+# Ultralytics 출력
+runs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
